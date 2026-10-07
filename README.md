@@ -1,87 +1,220 @@
-# GraphRAG (v1 – document GraphRAG)
+<div align="center">
 
-Hierarchical GraphRAG: LLM extraction → Neo4j knowledge graph → hierarchical Leiden communities (GDS) → community-summary drill-down retrieval with a fact-checked, cited answer — and a UI that replays which nodes the model picked.
+# GraphRAG
 
-Runs fully in Docker. LLM and embeddings are switchable in `.env`: **local** (llama.cpp on an NVIDIA GPU) or **Gemini** (cloud).
+**Hierarchical Graph RAG over your documents — and you can watch the model think.**
 
-## Run
-1. Docker Desktop running.
-2. Double-click `start.bat`. On the first run it copies `.env.example` to `.env` and opens it: set `NEO4J_PASSWORD` (≥ 8 chars), choose `LLM_PROVIDER` / `EMBED_PROVIDER`, and add `GEMINI_API_KEY` only if a provider is `gemini`. Save, then run `start.bat` again.
-3. The browser opens at http://localhost:8000. Neo4j Browser is at http://localhost:7474.
+Upload a document, get a knowledge graph with multi-level communities, ask questions,
+and see exactly which communities and entities the retriever visited, used and cited.
 
-Stop: `stop.bat` (keeps the data). Clear the graph: UI → **Reset graph**. Wipe everything including the local-model volume: `docker compose --profile local down -v`.
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
+![Neo4j](https://img.shields.io/badge/Neo4j-2026.08%20%2B%20GDS-4581C3?logo=neo4j&logoColor=white)
+![llama.cpp](https://img.shields.io/badge/llama.cpp-local%20GPU-000000)
+![Gemini](https://img.shields.io/badge/Gemini-optional-8E75B2?logo=googlegemini&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-one%20command-2496ED?logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-Note: Neo4j stores the password on its **first successful start**. To change `NEO4J_PASSWORD` later, run `docker compose down -v` (this wipes the graph), then `start.bat`.
+</div>
 
-## Layout
+---
+
+## Highlights
+
+- **Real GraphRAG, not just vectors.** An LLM extracts entities and relationships, duplicates are merged (vector ANN → LLM confirms), and **hierarchical Leiden** (Neo4j GDS) builds communities with LLM-written summaries at every level.
+- **Top-down retrieval.** Questions are matched against top-level community summaries, then the retriever **drills down level by level** to leaf communities, pulling entities, relationships and the original source text.
+- **Grounded answers.** One rerank pass, then an answer with `[S1]`-style citations, then a **claim-by-claim fact-check** that removes anything the context does not support.
+- **Explainable UI.** The traversal is replayed on the graph: scored → visited → accepted / rejected → picked → cited.
+- **Local or cloud.** Run fully offline on an NVIDIA GPU with **llama.cpp**, or use **Gemini** — one line in `.env`.
+- **One command, fully containerised.** `start.bat` brings up Neo4j, the backend, the UI and (optionally) the local models. Nothing is installed on the host.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    UI["Web UI<br/>Cytoscape.js"] <--> API["FastAPI backend"]
+    API <--> NEO[("Neo4j + GDS<br/>graph, vectors, Leiden")]
+    API -- "LLM_PROVIDER / EMBED_PROVIDER" --> P{provider}
+    P -- local --> LLM["llama.cpp: LLM<br/>Qwen3.5-9B"]
+    P -- local --> EMB["llama.cpp: embeddings<br/>Qwen3-Embedding-0.6B"]
+    P -- gemini --> GEM["Gemini API"]
 ```
-docker-compose.yml   neo4j (+GDS), backend (FastAPI), and — profile "local" — models-init, embed, llm (llama.cpp)
-backend/app/         Python pipeline + API
-frontend/            static UI served by the backend (Cytoscape.js + fcose vendored in frontend/vendor, MIT)
-.env                 secrets + provider choice (never committed, never baked into images)
-models/              optional: GGUF files here are copied once into the Docker volume `graphrag_models` (git-ignored)
+
+### Ingestion
+
+```mermaid
+flowchart TB
+    subgraph build["1 · Build the graph"]
+        direction LR
+        A["PDF / DOCX / TXT / MD"] --> B["Extract text + chunk"]
+        B --> C["LLM: entities &<br/>relationships"]
+        C --> D["Entity resolution<br/>ANN + LLM confirm"]
+    end
+    subgraph structure["2 · Structure it"]
+        direction LR
+        E["Weighted base graph"] --> F["Hierarchical Leiden (GDS)"]
+        F --> G["Bottom-up community<br/>summaries + vectors"]
+    end
+    build --> structure
 ```
-Everything runs inside containers, so nothing is installed on the host.
 
-## Build status
-- [x] Step 1 – infrastructure, health check, start/stop CLI
-- [x] Step 2 – ingestion pipeline
-- [x] Step 3 – retrieval pipeline
-- [x] Step 4 – UI (upload, graph, Q&A, node highlighting)
+### Retrieval
 
-## Ingestion pipeline (Step 2)
-| Step | Where | What |
-|---|---|---|
-| 1-3 | `ingest/text.py` | PDF/DOCX/TXT/MD → text → recursive chunks (`CHUNK_SIZE_CHARS`) |
-| 4 | `ingest/extraction.py` | LLM structured output per chunk → entities + relationships (stored on the Chunk, so failed jobs resume) |
-| 5 | `ingest/graph.py` | exact-name merge, then ANN (Neo4j HNSW vector index) candidates → LLM confirms → merge (old name kept as `:Alias`) |
-| 6 | `ingest/graph.py` | `(:Entity)-[:RELATED {type, weight}]->(:Entity)`, `(:Chunk)-[:MENTIONS]->(:Entity)` |
-| 7 | `ingest/communities.py` | GDS hierarchical Leiden (`includeIntermediateCommunities`); levels that don't split anything are collapsed |
-| 8 | `ingest/communities.py` | bottom-up summaries + embeddings; `(:Entity)-[:IN_COMMUNITY]->(:Community)-[:CHILD_OF]->(:Community)`. Cached by content hash, so re-runs only pay for changed communities |
+```mermaid
+flowchart TB
+    subgraph find["1 · Find"]
+        direction LR
+        Q["Question"] --> T["Score top-level<br/>communities"]
+        T --> BFS["Drill down level by level<br/>(BFS + threshold)"]
+        BFS --> L["Leaf: entities, relations,<br/>source excerpts"]
+    end
+    subgraph answer["2 · Answer"]
+        direction LR
+        R["LLM rerank"] --> A["Cited answer"]
+        A --> FC["Fact-check per claim"]
+        FC --> OUT["Final answer<br/>+ traversal trace"]
+    end
+    find --> answer
+```
 
-API (try it at http://localhost:8000/docs): `POST /api/query`, `POST /api/documents`, `GET /api/jobs/{id}`, `GET /api/documents`, `GET /api/stats`, `POST /api/communities/rebuild`, `DELETE /api/graph`.
+---
 
-## Retrieval pipeline (Step 3) — `retrieval/engine.py`
-1. Embed the question twice (RETRIEVAL_QUERY for summaries, SEMANTIC_SIMILARITY for entities).
-2–3. Score top-level communities; keep those ≥ `RETRIEVAL_THRESHOLD` (fallback: best one + near ties).
-4. BFS drill-down: accepted community → summary into context → enqueue children (always descend into the best child).
-   Leaf community → top entities by similarity, their relationships, and the source chunks that mention them.
-5. Dedupe, one LLM **rerank** of summaries + source excerpts, trim to `CONTEXT_MAX_CHARS`.
-6. Draft answer with `[C#][E#][R#][S#]` citations → LLM **fact-check** per claim → corrected final answer.
+## Quick start (Windows)
 
-The response includes `trace` (every community scored/visited/accepted, leaf entities, rerank, cited nodes) — the UI in Step 4 replays it to colour the nodes.
+**Requirements:** Docker Desktop (WSL2 backend). For local models, an NVIDIA GPU with ~10 GB free VRAM and an up-to-date driver.
 
-## UI (Step 4) — http://localhost:8000
-- **Left:** upload (drag & drop), live ingestion progress, document list, colour legend, reset.
-- **Centre:** graph — entities (colour = type) + community hubs (bigger = higher level). Click a node for details; toggle communities; Fit.
-- **Right:** ask a question (Ctrl+Enter). The traversal is replayed on the graph: top-level scores → visited (amber) → accepted (green) / rejected (grey) → leaf entities picked (cyan) → cited nodes (pink glow). Click a `[S1]`-style citation to see its source text and jump to its nodes. The *Traversal* list shows every score (use it to tune `RETRIEVAL_THRESHOLD`).
+```powershell
+git clone https://github.com/sinaKGT/GraphRAG.git
+cd GraphRAG
+.\start.bat
+```
 
-## Local models (llama.cpp) — `LLM_PROVIDER=local`, `EMBED_PROVIDER=local`
-| Role | Model | File | Why |
+1. The first run creates `.env` from `.env.example` and opens it. Set `NEO4J_PASSWORD` (at least 8 characters) and pick your providers. A `GEMINI_API_KEY` is only needed if a provider is `gemini`.
+2. Run `start.bat` again. With local models, the first start downloads ~6.6 GB once (resumable).
+3. The app opens at **http://localhost:8000**. Drop in a document, wait for the progress bar, then ask a question.
+
+Stop with `stop.bat` (your graph and models are kept).
+
+| Service | URL |
+|---|---|
+| GraphRAG UI | http://localhost:8000 |
+| API docs (Swagger) | http://localhost:8000/docs |
+| Neo4j Browser | http://localhost:7474 |
+| llama.cpp chat (local mode) | http://localhost:8081 |
+
+> **Linux:** `cp .env.example .env`, edit it, then `docker compose --profile local run --rm models-init` and `docker compose --profile local up -d --build`. For Gemini-only (any OS, no GPU needed), leave out `--profile local`.
+
+---
+
+## Using the UI
+
+| Panel | What you can do |
+|---|---|
+| **Documents** (left) | Drag & drop files, follow ingestion progress, reset the graph |
+| **Graph** (centre) | Entities coloured by type, community hubs sized by level. Click any node for its description or summary |
+| **Ask** (right) | Ask a question (`Ctrl+Enter`). Click a citation such as `[S1]` to read the source text and jump to its nodes |
+
+**Traversal colours:** <kbd>amber</kbd> scored / visited · <kbd>green</kbd> accepted · <kbd>grey</kbd> rejected / dropped · <kbd>cyan</kbd> entity picked · <kbd>pink</kbd> cited in the answer.
+The *Traversal* list shows every relevance score, which makes tuning `RETRIEVAL_THRESHOLD` easy.
+
+---
+
+## Models
+
+| Mode | LLM | Embeddings | Notes |
 |---|---|---|---|
-| LLM (default) | Qwen3.5-9B | `Qwen3.5-9B-UD-Q4_K_XL.gguf` (6 GB) | Fits fully in 16 GB VRAM — fast and validated end-to-end |
-| LLM (optional) | Qwen3.6-35B-A3B (MoE, ~3B active) | `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` (22.4 GB) | Higher quality; `--fit` splits it between 16 GB VRAM and system RAM, so it is noticeably slower |
-| Embeddings | Qwen3-Embedding-0.6B | `Qwen3-Embedding-0.6B-Q8_0.gguf` (0.6 GB) | Strong small embedder, instruction-aware (queries get an instruction), 1024 dims |
+| **Local** (default) | Qwen3.5-9B `UD-Q4_K_XL` (6 GB) | Qwen3-Embedding-0.6B `Q8_0` (1024-d) | Fits entirely in 16 GB VRAM; JSON-schema-constrained output |
+| Local (larger) | Qwen3.6-35B-A3B `UD-Q4_K_XL` (22 GB, MoE) | same | Higher quality; split across VRAM and RAM, so slower |
+| **Gemini** | `gemini-3.8-flash` | `gemini-embedding-001` (768-d) | Free tier works (built-in rate limiting and retry) |
 
-- Models live in the Docker volume `graphrag_models` (WSL's Linux disk), so llama.cpp can memory-map them fast. Loading them through the Windows mount (`D:\`) failed with `read error: Cannot allocate memory`.
-- `start.bat` fills that volume once, copying from `.\models` if the file is there or otherwise downloading it (resumable), then starts `embed` → `llm` → backend. After that the `.\models` copy can be deleted.
-- Structured output uses llama.cpp JSON-schema constrained decoding (the Pydantic schemas in `prompts.py`); thinking is off for these tasks.
-- llama.cpp's own chat UI: http://localhost:8081 (useful to sanity-check the model).
-- Switching provider for embeddings changes the vector space: the graph remembers which embedding model built it and refuses to mix — reset the graph after switching.
-- Provider-specific defaults (measured): duplicate-candidate similarity 0.85 (gemini) / 0.70 (local); retrieval threshold 0.55 / 0.50.
+> Switching the **embedding** provider changes the vector space. The graph records which embedding model built it and refuses to mix them: reset the graph after switching.
 
-**Windows prerequisites (once):** NVIDIA driver up to date; Docker Desktop with WSL2 backend; give WSL enough RAM for the CPU-side experts — `%UserProfile%\.wslconfig`:
+<details>
+<summary><b>Configuration reference (<code>.env</code>)</b></summary>
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LLM_PROVIDER` / `EMBED_PROVIDER` | `local` | `local` (llama.cpp) or `gemini` |
+| `GEMINI_API_KEY` | — | Only for Gemini |
+| `NEO4J_PASSWORD` | — | At least 8 characters; stored by Neo4j on first start |
+| `LOCAL_LLM_REPO` / `LOCAL_LLM_FILE` | Qwen3.5-9B | Any GGUF on Hugging Face |
+| `LLM_CONCURRENCY` | `2` | Parallel LLM calls (= llama.cpp slots) |
+| `CHUNK_SIZE_CHARS` | `4000` | ~1000 tokens per chunk |
+| `ER_COSINE_THRESHOLD` | local `0.70` / gemini `0.85` | Similarity for duplicate candidates |
+| `LEIDEN_GAMMA` | `1.0` | Higher means smaller, more numerous communities |
+| `RETRIEVAL_THRESHOLD` | local `0.50` / gemini `0.55` | Score needed to accept or descend into a community |
+| `CONTEXT_MAX_CHARS` | `30000` | Context budget sent to the LLM |
+
+See [`.env.example`](.env.example) for the full list.
+</details>
+
+<details>
+<summary><b>Graph model</b></summary>
+
 ```
-[wsl2]
-memory=24GB
+(:Document)<-[:PART_OF]-(:Chunk)-[:MENTIONS]->(:Entity)
+(:Entity)-[:RELATED {type, weight}]->(:Entity)
+(:Entity)-[:IN_COMMUNITY]->(:Community {level, title, summary, embedding})
+(:Community)-[:CHILD_OF]->(:Community)
+(:Alias)-[:ALIAS_OF]->(:Entity)          // names merged by entity resolution
 ```
-then `wsl --shutdown` and restart Docker Desktop.
+</details>
 
-**Tip:** close other GPU apps (e.g. LM Studio) before starting — llama.cpp sizes itself to the free VRAM at load time.
+<details>
+<summary><b>API</b></summary>
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/documents` | Upload a file; returns a background job |
+| `GET` | `/api/jobs/{id}` | Ingestion progress |
+| `POST` | `/api/query` | `{"question": "..."}` → answer, fact-check, citations, traversal trace |
+| `GET` | `/api/graph` | Entities, communities and edges for visualisation |
+| `GET` | `/api/stats` · `/api/health` | Graph counts · status of Neo4j, LLM and embeddings |
+| `POST` | `/api/communities/rebuild` | Re-run Leiden and summaries (cached summaries are reused) |
+| `DELETE` | `/api/graph` | Reset everything |
+
+Interactive docs: http://localhost:8000/docs
+</details>
+
+<details>
+<summary><b>Project structure</b></summary>
+
+```
+├── backend/app/
+│   ├── ingest/        text.py · extraction.py · graph.py · communities.py · pipeline.py
+│   ├── retrieval/     engine.py  (BFS drill-down, rerank, answer, fact-check, trace)
+│   ├── llm.py         Gemini + llama.cpp backends behind one interface
+│   ├── db.py          Neo4j schema, vector indexes, embedding-space guard
+│   ├── prompts.py     all prompts + structured-output schemas
+│   └── main.py        FastAPI routes
+├── frontend/          index.html · app.js · style.css · vendor/ (Cytoscape.js, MIT)
+├── docker-compose.yml neo4j · backend · models-init · embed · llm
+├── start.bat / stop.bat
+└── .env.example
+```
+</details>
+
+<details>
+<summary><b>Troubleshooting</b></summary>
+
+| Symptom | Fix |
+|---|---|
+| Neo4j container "unhealthy" | `NEO4J_PASSWORD` is shorter than 8 characters. Fix it, then run `docker compose down -v` |
+| Local model very slow (~25 tok/s prompt processing) | Another app (e.g. LM Studio) is holding VRAM. Close it, then `docker compose restart llm` |
+| llm container exits with code 137 | Not enough RAM for Docker. Add `memory=24GB` under `[wsl2]` in `%UserProfile%\.wslconfig`, then `wsl --shutdown` |
+| "Graph was built with embeddings …" | You switched embedding provider or size. Reset the graph in the UI |
+| Ingestion seems stuck | Check `docker compose logs llm`; while the model loads, jobs wait and retry automatically |
+</details>
+
+---
 
 ## Security
-- Secrets live only in `.env`, which is git-ignored and excluded from Docker build contexts (`.dockerignore`); the backend reads it at runtime via `env_file`.
-- All ports (8000, 7474, 7687, 8081) are bound to `127.0.0.1` only.
+
+- Secrets live only in `.env`, which is git-ignored and excluded from Docker build contexts.
+- All ports are bound to `127.0.0.1`, so nothing is exposed to your network.
 
 ## License
-MIT — see `LICENSE`. Vendored front-end libraries (Cytoscape.js, fcose, cose-base, layout-base) are MIT; their licences are in `frontend/vendor/licenses/`.
+
+[MIT](LICENSE) © 2026 Sina Khoshgoftar. Vendored front-end libraries (Cytoscape.js, cytoscape-fcose, cose-base, layout-base) are MIT, with their licences in [`frontend/vendor/licenses/`](frontend/vendor/licenses/).
