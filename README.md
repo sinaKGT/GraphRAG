@@ -93,16 +93,18 @@ cd GraphRAG
 
 1. The first run creates `.env` from `.env.example` and opens it. Set `NEO4J_PASSWORD` (at least 8 characters) and pick your providers. A `GEMINI_API_KEY` is only needed if a provider is `gemini`.
 2. Run `start.bat` again. With local models, the first start downloads ~6.6 GB once (resumable).
-3. The app opens at **http://localhost:8000**. Drop in a document, wait for the progress bar, then ask a question.
+3. The app opens at **http://localhost:18400**. Drop in a document, wait for the progress bar, then ask a question.
 
 Stop with `stop.bat` (your graph and models are kept).
 
-| Service | URL |
-|---|---|
-| GraphRAG UI | http://localhost:8000 |
-| API docs (Swagger) | http://localhost:8000/docs |
-| Neo4j Browser | http://localhost:7474 |
-| llama.cpp chat (local mode) | http://localhost:8081 |
+| Service | URL | `.env` variable |
+|---|---|---|
+| GraphRAG UI | http://localhost:18400 | `APP_PORT` |
+| API docs (Swagger) | http://localhost:18400/docs | `APP_PORT` |
+| Neo4j Browser | http://localhost:18474 | `NEO4J_HTTP_PORT` (Bolt: `NEO4J_BOLT_PORT`, 18687) |
+| llama.cpp chat (local mode) | http://localhost:18481 | `LLM_UI_PORT` |
+
+Ports are deliberately uncommon so GraphRAG doesn't collide with other local apps. `start.bat` checks them first and stops with a clear message if another program already uses one.
 
 > **Linux:** `cp .env.example .env`, edit it, then `docker compose --profile local run --rm models-init` and `docker compose --profile local up -d --build`. For Gemini-only (any OS, no GPU needed), leave out `--profile local`.
 
@@ -175,7 +177,7 @@ See [`.env.example`](.env.example) for the full list.
 | `POST` | `/api/communities/rebuild` | Re-run Leiden and summaries (cached summaries are reused) |
 | `DELETE` | `/api/graph` | Reset everything |
 
-Interactive docs: http://localhost:8000/docs
+Interactive docs: http://localhost:18400/docs
 </details>
 
 <details>
@@ -205,6 +207,7 @@ Interactive docs: http://localhost:8000/docs
 | Local model very slow (~25 tok/s prompt processing) | Another app (e.g. LM Studio) is holding VRAM. Close it, then `docker compose restart llm` |
 | llm container exits with code 137 | Not enough RAM for Docker. Add `memory=24GB` under `[wsl2]` in `%UserProfile%\.wslconfig`, then `wsl --shutdown` |
 | "Graph was built with embeddings …" | You switched embedding provider or size. Reset the graph in the UI |
+| "Port … is already in use" on start | Another program listens on that port. Set a different value for the named variable in `.env` (e.g. `APP_PORT=18500`) |
 | Ingestion seems stuck | Check `docker compose logs llm`; while the model loads, jobs wait and retry automatically |
 </details>
 

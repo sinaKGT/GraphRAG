@@ -14,12 +14,18 @@ if not exist ".env" (
 )
 
 rem ---- read settings from .env ----
-set "APP_PORT=8000"
+set "APP_PORT=18400"
+set "NEO4J_HTTP_PORT=18474"
+set "NEO4J_BOLT_PORT=18687"
+set "LLM_UI_PORT=18481"
 set "NEO4J_PASSWORD="
 set "LLM_PROVIDER=gemini"
 set "EMBED_PROVIDER=gemini"
 for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do (
-  if /i "%%A"=="APP_PORT" set "APP_PORT=%%B"
+  if /i "%%A"=="APP_PORT" for /f "tokens=1" %%V in ("%%B") do set "APP_PORT=%%V"
+  if /i "%%A"=="NEO4J_HTTP_PORT" for /f "tokens=1" %%V in ("%%B") do set "NEO4J_HTTP_PORT=%%V"
+  if /i "%%A"=="NEO4J_BOLT_PORT" for /f "tokens=1" %%V in ("%%B") do set "NEO4J_BOLT_PORT=%%V"
+  if /i "%%A"=="LLM_UI_PORT" for /f "tokens=1" %%V in ("%%B") do set "LLM_UI_PORT=%%V"
   if /i "%%A"=="NEO4J_PASSWORD" set "NEO4J_PASSWORD=%%B"
   if /i "%%A"=="LLM_PROVIDER" set "LLM_PROVIDER=%%B"
   if /i "%%A"=="EMBED_PROVIDER" set "EMBED_PROVIDER=%%B"
@@ -48,6 +54,20 @@ if defined USES_GEMINI (
   )
 )
 echo Providers: LLM=%LLM_PROVIDER%  embeddings=%EMBED_PROVIDER%
+
+rem ---- make sure our ports are free (skipped when GraphRAG is already running) ----
+set "RUNNING="
+for /f %%I in ('docker ps -q -f "name=graphrag-" 2^>nul') do set "RUNNING=1"
+if defined RUNNING goto ports_ok
+call :checkport APP_PORT %APP_PORT% || goto port_busy
+call :checkport NEO4J_HTTP_PORT %NEO4J_HTTP_PORT% || goto port_busy
+call :checkport NEO4J_BOLT_PORT %NEO4J_BOLT_PORT% || goto port_busy
+if defined PROFILE (call :checkport LLM_UI_PORT %LLM_UI_PORT% || goto port_busy)
+goto ports_ok
+:port_busy
+pause
+exit /b 1
+:ports_ok
 
 rem ---- local models: download first (foreground, so you can see progress) ----
 if defined PROFILE (
@@ -80,8 +100,8 @@ echo [3/3] Ready.
 start "" "http://localhost:%APP_PORT%"
 echo.
 echo   App:            http://localhost:%APP_PORT%
-echo   Neo4j Browser:  http://localhost:7474   (user: neo4j, password from .env)
-if defined PROFILE echo   llama.cpp UI:   http://localhost:8081   (chat with the local model directly)
+echo   Neo4j Browser:  http://localhost:%NEO4J_HTTP_PORT%   (user: neo4j, password from .env)
+if defined PROFILE echo   llama.cpp UI:   http://localhost:%LLM_UI_PORT%   (chat with the local model directly)
 echo   Stop:           stop.bat
 echo.
 echo Streaming logs - Ctrl+C stops watching, containers keep running.
@@ -90,3 +110,16 @@ if defined PROFILE (
 ) else (
   docker compose logs -f backend
 )
+exit /b 0
+
+rem ---- :checkport NAME PORT -> errorlevel 1 if another program is listening on PORT ----
+:checkport
+set "PID="
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /c:":%~2 " ^| findstr LISTENING') do if not defined PID set "PID=%%P"
+if not defined PID exit /b 0
+set "PNAME=unknown"
+for /f "tokens=1 delims=," %%N in ('tasklist /fi "PID eq %PID%" /fo csv /nh 2^>nul') do set "PNAME=%%~N"
+echo.
+echo [ERROR] Port %~2 is already in use by another program: %PNAME% ^(PID %PID%^).
+echo         GraphRAG will not share a port. Pick a free one for %~1 in .env, then run start.bat again.
+exit /b 1
