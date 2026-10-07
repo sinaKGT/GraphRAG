@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GraphRAG</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%224%22 cy=%224%22 r=%223%22 fill=%22%235b8cff%22/%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%223%22 fill=%22%23e879f9%22/%3E%3Cpath d=%22M4 4L12 12%22 stroke=%22%238a93a3%22/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">GraphRAG</div>
+  <div id="stats" class="stats"></div>
+  <div id="health" class="health" title="System status"><span class="dot"></span><span class="txt">checking…</span></div>
+</header>
+
+<main>
+  <!-- ============ left: documents ============ -->
+  <aside class="panel left">
+    <h2>Documents</h2>
+    <label id="drop" class="drop">
+      <input id="file" type="file" accept=".pdf,.docx,.txt,.md" hidden>
+      <strong>Drop a file</strong> or click to upload
+      <small>PDF · DOCX · TXT · MD</small>
+    </label>
+    <div id="job" class="job hidden">
+      <div class="job-head"><span id="job-name"></span><span id="job-status"></span></div>
+      <div class="bar"><div id="job-bar"></div></div>
+      <div id="job-stage" class="muted"></div>
+    </div>
+    <ul id="docs" class="docs"></ul>
+    <div class="spacer"></div>
+    <div class="legend">
+      <div><span class="sw community"></span>community (bigger = higher level)</div>
+      <div><span class="sw entity"></span>entity (colour = type)</div>
+      <h3>While answering</h3>
+      <div><span class="sw hl-scored"></span>scored / visited</div>
+      <div><span class="sw hl-accepted"></span>accepted (used)</div>
+      <div><span class="sw hl-rejected"></span>rejected / dropped</div>
+      <div><span class="sw hl-picked"></span>entity picked at leaf</div>
+      <div><span class="sw hl-cited"></span>cited in the answer</div>
+    </div>
+    <button id="reset" class="btn danger ghost">Reset graph</button>
+  </aside>
+
+  <!-- ============ centre: graph ============ -->
+  <section class="graph-wrap">
+    <div id="cy"></div>
+    <div class="graph-tools">
+      <label><input id="show-comm" type="checkbox" checked> communities</label>
+      <button id="fit" class="btn ghost small">Fit</button>
+      <button id="clear-hl" class="btn ghost small">Clear highlight</button>
+    </div>
+    <div id="empty" class="empty hidden">Upload a document to build the graph.</div>
+    <div id="details" class="details hidden"></div>
+  </section>
+
+  <!-- ============ right: Q&A ============ -->
+  <aside class="panel right">
+    <h2>Ask</h2>
+    <form id="ask">
+      <textarea id="question" rows="3" placeholder="Ask a question about your documents…"></textarea>
+      <div class="row">
+        <button id="ask-btn" class="btn primary" type="submit">Ask</button>
+        <button id="replay" class="btn ghost hidden" type="button">Replay traversal</button>
+        <span id="ask-status" class="muted"></span>
+      </div>
+    </form>
+    <div id="answer" class="answer hidden"></div>
+    <div id="factcheck" class="factcheck hidden"></div>
+    <details id="trace-box" class="trace hidden" open>
+      <summary>Traversal <span class="muted" id="trace-meta"></span></summary>
+      <ol id="trace"></ol>
+    </details>
+  </aside>
+</main>
+
+<script src="vendor/cytoscape.min.js"></script>
+<script src="vendor/layout-base.js"></script>
+<script src="vendor/cose-base.js"></script>
+<script src="vendor/cytoscape-fcose.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,185 @@
+name: graphrag
+
+# Local-model services (models-init, embed, llm) belong to the "local" profile.
+# start.bat enables it automatically when LLM_PROVIDER or EMBED_PROVIDER is "local" in .env.
+
+x-llama: &llama
+  image: ${LOCAL_LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
+  restart: unless-stopped
+  profiles: ["local"]
+  volumes:
+    - models:/models:ro               # Docker volume on WSL's Linux disk -> fast mmap (not the Windows mount)
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 360
+    start_period: 60s
+
+services:
+  neo4j:
+    image: neo4j:2026.08.1            # pinned: GDS 2026.08.1 is the matching plugin
+    container_name: graphrag-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}
+      NEO4J_PLUGINS: '["graph-data-science"]'
+      NEO4J_dbms_security_procedures_unrestricted: gds.*
+      NEO4J_dbms_security_procedures_allowlist: gds.*,db.*
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP:-2G}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP:-2G}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-1G}
+    ports:
+      # bound to localhost only; 7474 = Neo4j Browser, 7687 = Bolt
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_plugins:/plugins        # keeps the GDS jar so it isn't re-downloaded every start
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_AUTH#neo4j/}\" 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 40
+      start_period: 20s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: graphrag-backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      LOCAL_LLM_URL: http://llm:8080
+      LOCAL_EMBED_URL: http://embed:8080
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    # no dependency on llm/embed: the UI comes up immediately and shows "loading" until the
+    # local models are ready; jobs wait for them (LOCAL_READY_TIMEOUT_S).
+
+  # ---------------------------------------------------------------- local models (profile "local")
+  models-init:
+    # one-shot: fills the "models" volume. Copies from .\models (D:\) if the file is there,
+    # otherwise downloads from Hugging Face (resumable). Exits immediately when already present.
+    image: curlimages/curl:8.22.0
+    container_name: graphrag-models-init
+    profiles: ["local"]
+    user: "0:0"
+    environment:
+      LLM_REPO: ${LOCAL_LLM_REPO:-unsloth/Qwen3.5-9B-GGUF}
+      LLM_FILE: ${LOCAL_LLM_FILE:-Qwen3.5-9B-UD-Q4_K_XL.gguf}
+      EMB_REPO: ${LOCAL_EMBED_REPO:-Qwen/Qwen3-Embedding-0.6B-GGUF}
+      EMB_FILE: ${LOCAL_EMBED_FILE:-Qwen3-Embedding-0.6B-Q8_0.gguf}
+    volumes:
+      - models:/models
+      - ./models:/src:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        get() {
+          dst="/models/$$2"
+          if [ -s "$$dst" ]; then echo "[models] $$2 ready"; return; fi
+          if [ -s "/src/$$2" ]; then
+            echo "[models] copying $$2 from .\\models into the Docker volume (one-time, a few minutes) ..."
+            cp "/src/$$2" "$$dst.part" && mv "$$dst.part" "$$dst"
+          else
+            echo "[models] downloading $$2 from $$1 (resumable; progress below) ..."
+            curl -fL --retry 10 --retry-delay 5 -C - -o "$$dst.part" "https://huggingface.co/$$1/resolve/main/$$2"
+            mv "$$dst.part" "$$dst"
+          fi
+          echo "[models] $$2 done"
+        }
+        get "$$EMB_REPO" "$$EMB_FILE"
+        get "$$LLM_REPO" "$$LLM_FILE"
+        df -h /models | tail -1 | awk '{print "[models] volume usage: "$$3" used, "$$4" free"}'
+
+  embed:
+    <<: *llama
+    container_name: graphrag-embed
+    depends_on:
+      models-init:
+        condition: service_completed_successfully
+    command:
+      - -m
+      - /models/${LOCAL_EMBED_FILE:-Qwen3-Embedding-0.6B-Q8_0.gguf}
+      - --alias
+      - local-embed
+      - --embeddings
+      - --pooling
+      - last
+      - -c
+      - "8192"
+      - -b
+      - "8192"
+      - -ub
+      - "8192"
+      - -np
+      - "1"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+
+  llm:
+    <<: *llama
+    container_name: graphrag-llm
+    depends_on:
+      models-init:
+        condition: service_completed_successfully
+      embed:
+        condition: service_healthy     # start after embed so --fit sees the VRAM it already uses
+    ports:
+      - "127.0.0.1:8081:8080"          # llama.cpp's own web UI / API, handy for testing the model
+    command:
+      - -m
+      - /models/${LOCAL_LLM_FILE:-Qwen3.5-9B-UD-Q4_K_XL.gguf}
+      - --alias
+      - local-llm
+      - -c
+      - "${LOCAL_LLM_CTX:-65536}"      # total context, shared by the slots below
+      - -np
+      - "${LLM_CONCURRENCY:-2}"        # parallel slots = backend concurrency
+      - -fa
+      - "on"
+      - -ctk
+      - q8_0
+      - -ctv
+      - q8_0
+      - --jinja
+      - -b
+      - "${LOCAL_UBATCH:-2048}"       # bigger batches: prompt processing of CPU-resident MoE experts runs on the GPU in larger chunks
+      - -ub
+      - "${LOCAL_UBATCH:-2048}"
+      - -lm
+      - "${LOCAL_LOAD_MODE:-auto}"     # auto = mmap; "none" loads the RAM-side experts into memory (faster, needs WSL RAM >= 24 GB)
+      - --fit
+      - "on"                           # auto-split: layers/experts that don't fit in VRAM go to system RAM
+      - --fit-target
+      - "${LOCAL_FIT_TARGET_MB:-1024}" # MiB of VRAM to keep free
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+
+volumes:
+  models:                              # local GGUF files (graphrag_models); survives stop.bat, removed by `down -v`
+  neo4j_data:
+  neo4j_plugins:
+  neo4j_logs:
+  uploads:
