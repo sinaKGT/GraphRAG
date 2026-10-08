@@ -17,8 +17,9 @@ log = logging.getLogger("graphrag.jobs")
 
 @dataclass
 class Job:
-    kind: str                           # "ingest" | "rebuild"
+    kind: str                           # "ingest" | "rebuild" | "profile"
     doc_id: str | None = None
+    dataset_id: str | None = None
     filename: str | None = None
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     status: str = "queued"              # queued | running | done | failed

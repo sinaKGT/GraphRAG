@@ -39,7 +39,9 @@ def run(query: str, **params) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- schema
-_VECTOR_INDEXES = {"entity_embedding": "Entity", "community_embedding": "Community"}
+_VECTOR_INDEXES = {"entity_embedding": "Entity", "community_embedding": "Community",
+                   "dataset_embedding": "Dataset", "dataset_column_embedding": "DatasetColumn"}
+_DOC_LABELS = ("Document", "Chunk", "Entity", "Alias", "Community")   # document graph (reset by "Reset graph")
 _embedding_mismatch: str | None = None   # set when the graph was built with another embedding model
 
 
@@ -54,10 +56,13 @@ def init_schema() -> None:
         "CREATE CONSTRAINT community_id IF NOT EXISTS FOR (c:Community) REQUIRE c.id IS UNIQUE",
         "CREATE CONSTRAINT meta_key IF NOT EXISTS FOR (m:Meta) REQUIRE m.key IS UNIQUE",
         "CREATE INDEX community_level IF NOT EXISTS FOR (c:Community) ON (c.level)",
+        "CREATE CONSTRAINT dataset_id IF NOT EXISTS FOR (d:Dataset) REQUIRE d.id IS UNIQUE",
+        "CREATE CONSTRAINT dataset_hash IF NOT EXISTS FOR (d:Dataset) REQUIRE d.file_hash IS UNIQUE",
+        "CREATE CONSTRAINT dataset_column_id IF NOT EXISTS FOR (c:DatasetColumn) REQUIRE c.id IS UNIQUE",
     ]
     for q in statements:
         run(q)
-    _sync_embedding_space()
+    sync_embedding_space()
 
 
 def _index_dims() -> dict[str, int]:
@@ -75,7 +80,7 @@ def _create_vector_indexes(dim: int) -> None:
     run("CALL db.awaitIndexes(60)")
 
 
-def _sync_embedding_space() -> None:
+def sync_embedding_space() -> None:
     """The graph remembers which embedding model built it (:Meta {key:'embedding'}).
     Empty graph -> (re)create indexes for the current model. Non-empty graph built with another
     model -> refuse to mix vector spaces until the user resets or switches back."""
@@ -83,7 +88,8 @@ def _sync_embedding_space() -> None:
     s = get_settings()
     current, dim = s.embed_model_id, s.effective_embed_dim
     meta = run("MATCH (m:Meta {key: 'embedding'}) RETURN m.model_id AS id")
-    has_data = run("MATCH (n) WHERE n:Entity OR n:Community RETURN count(n) > 0 AS x")[0]["x"]
+    has_data = run("MATCH (n) WHERE n:Entity OR n:Community OR (n:Dataset AND n.embedding IS NOT NULL) "
+                   "RETURN count(n) > 0 AS x")[0]["x"]
     stored = meta[0]["id"] if meta else None
 
     if stored is None and has_data:
@@ -141,8 +147,9 @@ def graph_stats() -> dict:
 
 
 def reset_graph() -> None:
-    """Delete everything (in batches, safe for large graphs)."""
+    """Delete the document graph (in batches, safe for large graphs). The dataset catalog is kept."""
+    labels = " OR ".join(f"n:{label}" for label in _DOC_LABELS)
     # CALL {} IN TRANSACTIONS needs an implicit (auto-commit) transaction -> session.run
     with get_driver().session() as session:
-        session.run("MATCH (n) CALL (n) { DETACH DELETE n } IN TRANSACTIONS OF 5000 ROWS").consume()
-    _sync_embedding_space()  # empty graph -> indexes rebuilt for the current embedding model
+        session.run(f"MATCH (n) WHERE {labels} CALL (n) {{ DETACH DELETE n }} IN TRANSACTIONS OF 5000 ROWS").consume()
+    sync_embedding_space()  # empty graph -> indexes rebuilt for the current embedding model

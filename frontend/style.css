@@ -92,3 +92,53 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .trace li:hover { color: var(--accent); }
 .trace .sc { font-variant-numeric: tabular-nums; font-weight: 600; }
 .trace .ok { color: var(--accepted); } .trace .no { color: var(--rejected); } .trace .forced { color: var(--scored); }
+
+/* ---------------------------------------------------------------- page tabs */
+.tabs { display: flex; gap: 2px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+.tabs a { color: var(--muted); text-decoration: none; font-size: 12.5px; padding: 4px 12px; border-radius: 6px; }
+.tabs a:hover { color: var(--text); }
+.tabs a.active { background: var(--accent); color: #fff; font-weight: 600; }
+
+/* ---------------------------------------------------------------- datasets page */
+main.two-col { grid-template-columns: 280px 1fr; }
+.ds-list li { cursor: pointer; align-items: center; }
+.ds-list li:hover span:first-child { color: var(--accent); }
+.ds-list li.sel span:first-child { color: var(--accent); font-weight: 600; }
+.ds-list .sub { display: block; color: var(--muted); font-size: 11px; }
+.badge.needs_description { color: var(--scored); } .badge.ready { color: var(--accepted); } .badge.profiling { color: var(--scored); }
+.sw.ds-ready { border-radius: 3px; background: #14532d; border-color: var(--accepted); }
+.sw.ds-todo { border-radius: 3px; background: #3b2a0a; border: 2px dashed var(--scored); }
+.sw.col { background: #60a5fa; }
+.sw.col-key { background: #60a5fa; border-color: #fff; }
+
+.editor { position: absolute; inset: 0; background: var(--bg); overflow-y: auto; padding: 16px 20px 40px; z-index: 5; }
+.ed-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+.ed-title { flex: 1; min-width: 0; }
+.ed-file { font-size: 16px; font-weight: 700; word-break: break-all; }
+.warn { background: #f5a52418; border: 1px solid #f5a52455; color: var(--scored); padding: 8px 12px; border-radius: 8px; font-size: 12.5px; margin-bottom: 12px; }
+.ed-form { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.fld { display: block; margin-bottom: 10px; }
+.fld > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.fld em { font-style: normal; }
+input[type=text] { width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
+input[type=text]:focus { outline: none; border-color: var(--accent); }
+.ed-form .row .spacer { flex: 1; }
+.ed-cols-head { display: flex; align-items: baseline; gap: 10px; margin: 18px 0 8px; }
+.ed-cols-head h2 { margin: 0; }
+.tbl-wrap { border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+table.cols { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.cols th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+                background: var(--panel); padding: 8px 10px; border-bottom: 1px solid var(--line); position: sticky; top: 0; }
+table.cols td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.cols tr:last-child td { border-bottom: 0; }
+table.cols td.num { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.cols td.cname { font-weight: 600; word-break: break-word; min-width: 120px; }
+table.cols td.ex { color: var(--muted); max-width: 260px; word-break: break-word; }
+table.cols th.w-desc { min-width: 300px; width: 38%; }
+table.cols textarea { min-height: 34px; padding: 6px 8px; font-size: 12.5px; }
+textarea.ai, input.ai { border-color: #a78bfa88; background: #a78bfa12; }
+.dtype { font-size: 10.5px; padding: 1px 6px; border-radius: 5px; background: var(--panel2); white-space: nowrap; }
+.key { font-size: 10px; color: #fff; border: 1px solid #ffffff55; border-radius: 5px; padding: 0 5px; margin-left: 4px; }
+.toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--line);
+         padding: 9px 16px; border-radius: 9px; font-size: 13px; z-index: 50; box-shadow: 0 6px 24px #0008; }
+.toast.err { border-color: var(--danger); color: var(--danger); }

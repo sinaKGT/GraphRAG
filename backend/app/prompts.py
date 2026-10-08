@@ -177,3 +177,34 @@ class Verdict(BaseModel):
 class FactCheckResult(BaseModel):
     verdicts: list[Verdict]
     final_answer: str
+
+
+# =========================================================================== Datasets: description draft
+DATASET_DRAFT_SYSTEM = """You document tabular datasets for a data catalog. The catalog is searched by
+decision-making agents that must find the right dataset, the right columns and the right filters
+for a real-world event (incident, disruption, planning question).
+From the file name, column names, types, statistics and example values, write:
+- name: a short human-readable title for the dataset (max 8 words).
+- description: 2-4 sentences: what ONE ROW represents, what the dataset covers (topic, area, time span
+  if visible), and which kinds of questions or decisions it can support.
+- columns: for EVERY column (same names, same order), one sentence: what the value means, its unit if
+  evident, and how it is useful (filter, join key to other data, measure, label...).
+Respect the user's notes when given. Base everything on the evidence shown; when a meaning is a guess,
+start with "Probably". Do not invent facts."""
+
+DATASET_DRAFT_USER = """File: {file_name}{sheet}
+Rows: {rows}
+{user_notes}
+Columns:
+{columns}"""
+
+
+class ColumnDraft(BaseModel):
+    name: str
+    description: str
+
+
+class DatasetDraft(BaseModel):
+    name: str
+    description: str
+    columns: list[ColumnDraft]

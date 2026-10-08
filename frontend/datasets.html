@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GraphRAG · Datasets</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%224%22 cy=%224%22 r=%223%22 fill=%22%235b8cff%22/%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%223%22 fill=%22%23e879f9%22/%3E%3Cpath d=%22M4 4L12 12%22 stroke=%22%238a93a3%22/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">GraphRAG</div>
+  <nav class="tabs">
+    <a href="./">Documents</a>
+    <a href="datasets.html" class="active">Datasets</a>
+  </nav>
+  <div id="stats" class="stats"></div>
+  <div id="health" class="health" title="System status"><span class="dot"></span><span class="txt">checking…</span></div>
+</header>
+
+<main class="two-col">
+  <!-- ============ left: catalog ============ -->
+  <aside class="panel left">
+    <h2>Datasets</h2>
+    <label id="drop" class="drop">
+      <input id="file" type="file" accept=".xlsx,.xlsm,.xls,.ods,.csv,.tsv" hidden>
+      <strong>Drop an Excel / CSV file</strong> or click to upload
+      <small>XLSX · XLS · ODS · CSV · TSV — first sheet, first row = column names</small>
+    </label>
+    <div id="job" class="job hidden">
+      <div class="job-head"><span id="job-name"></span><span id="job-status"></span></div>
+      <div class="bar"><div id="job-bar"></div></div>
+      <div id="job-stage" class="muted"></div>
+    </div>
+    <ul id="datasets" class="docs ds-list"></ul>
+    <div class="spacer"></div>
+    <div class="legend">
+      <div><span class="sw ds-ready"></span>dataset (described)</div>
+      <div><span class="sw ds-todo"></span>dataset (needs description)</div>
+      <div><span class="sw col"></span>column (colour = type)</div>
+      <div><span class="sw col-key"></span>unique column (possible key)</div>
+    </div>
+    <button id="reset" class="btn danger ghost">Reset datasets</button>
+  </aside>
+
+  <!-- ============ centre: graph or editor ============ -->
+  <section class="graph-wrap">
+    <div id="cy"></div>
+    <div class="graph-tools">
+      <label><input id="show-cols" type="checkbox" checked> columns</label>
+      <button id="fit" class="btn ghost small">Fit</button>
+    </div>
+    <div id="empty" class="empty hidden">Upload an Excel or CSV file to start the catalog.</div>
+    <div id="details" class="details hidden"></div>
+
+    <!-- editor overlay -->
+    <div id="editor" class="editor hidden">
+      <div class="ed-head">
+        <button id="ed-back" class="btn ghost small">← Graph</button>
+        <div class="ed-title">
+          <div id="ed-file" class="ed-file"></div>
+          <div id="ed-meta" class="muted"></div>
+        </div>
+        <span id="ed-status"></span>
+      </div>
+      <div id="ed-warn" class="warn hidden"></div>
+
+      <div class="ed-form">
+        <label class="fld"><span>Dataset name</span>
+          <input id="ed-name" type="text" maxlength="200">
+        </label>
+        <label class="fld"><span>What is this dataset about? <em class="muted">(required)</em></span>
+          <textarea id="ed-desc" rows="3" maxlength="4000"
+            placeholder="What does one row represent? Which area / time does it cover? Which decisions or questions can it help with?"></textarea>
+        </label>
+        <div class="row">
+          <button id="ed-ai" class="btn" type="button" title="Drafts descriptions for the fields you left empty. You can edit everything before saving.">✨ Suggest empty fields with AI</button>
+          <button id="ed-save" class="btn primary" type="button">Save &amp; index</button>
+          <span id="ed-msg" class="muted"></span>
+          <span class="spacer"></span>
+          <button id="ed-delete" class="btn danger ghost small" type="button">Delete dataset</button>
+        </div>
+      </div>
+
+      <div class="ed-cols-head">
+        <h2>Columns</h2><span id="ed-count" class="muted"></span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="cols">
+          <thead><tr><th>#</th><th>Column</th><th>Type</th><th>Filled</th><th>Distinct</th><th>Examples / range</th><th class="w-desc">What does this column mean?</th></tr></thead>
+          <tbody id="ed-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="vendor/cytoscape.min.js"></script>
+<script src="vendor/layout-base.js"></script>
+<script src="vendor/cose-base.js"></script>
+<script src="vendor/cytoscape-fcose.js"></script>
+<script src="datasets.js"></script>
+</body>
+</html>

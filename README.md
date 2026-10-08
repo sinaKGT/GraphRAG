@@ -121,6 +121,17 @@ Ports are deliberately uncommon so GraphRAG doesn't collide with other local app
 **Traversal colours:** <kbd>amber</kbd> scored / visited · <kbd>green</kbd> accepted · <kbd>grey</kbd> rejected / dropped · <kbd>cyan</kbd> entity picked · <kbd>pink</kbd> cited in the answer.
 The *Traversal* list shows every relevance score, which makes tuning `RETRIEVAL_THRESHOLD` easy.
 
+### Datasets page (Excel / CSV catalog)
+
+Open **Datasets** in the header to build a metadata graph of your tabular data. Only the *meaning* of the data is indexed, not millions of rows.
+
+1. Drop an `.xlsx` / `.xls` / `.ods` / `.csv` file (first sheet, first row = column names; up to 500 MB, about 1M rows in roughly 25 s).
+2. Every column is profiled: type, fill rate, distinct values, range, most frequent values, and possible keys.
+3. Describe the dataset and its columns yourself, or press **Suggest empty fields with AI** and edit the draft.
+4. **Save & index** embeds the dataset and every column into Neo4j as `(:Dataset)-[:HAS_COLUMN]->(:DatasetColumn)`.
+
+Fictional sample files that share keys are in [`samples/datasets/`](samples/datasets/) (regenerate with `samples/make_samples.py`).
+
 ---
 
 ## Models
@@ -161,6 +172,8 @@ See [`.env.example`](.env.example) for the full list.
 (:Entity)-[:IN_COMMUNITY]->(:Community {level, title, summary, embedding})
 (:Community)-[:CHILD_OF]->(:Community)
 (:Alias)-[:ALIAS_OF]->(:Entity)          // names merged by entity resolution
+
+(:Dataset {name, description, row_count})-[:HAS_COLUMN]->(:DatasetColumn {dtype, stats, description})
 ```
 </details>
 
@@ -175,7 +188,12 @@ See [`.env.example`](.env.example) for the full list.
 | `GET` | `/api/graph` | Entities, communities and edges for visualisation |
 | `GET` | `/api/stats` · `/api/health` | Graph counts · status of Neo4j, LLM and embeddings |
 | `POST` | `/api/communities/rebuild` | Re-run Leiden and summaries (cached summaries are reused) |
-| `DELETE` | `/api/graph` | Reset everything |
+| `DELETE` | `/api/graph` | Reset the document graph (datasets are kept) |
+| `POST` | `/api/datasets` | Upload an Excel/CSV file; returns a profiling job |
+| `GET` | `/api/datasets` · `/api/datasets/{id}` | Catalog list · one dataset with column profiles |
+| `POST` | `/api/datasets/{id}/draft` | AI-drafted dataset and column descriptions |
+| `PUT` | `/api/datasets/{id}` | Save descriptions and embed (status → `ready`) |
+| `DELETE` | `/api/datasets/{id}` · `/api/datasets` | Delete one dataset · reset the catalog |
 
 Interactive docs: http://localhost:18400/docs
 </details>
@@ -191,7 +209,9 @@ Interactive docs: http://localhost:18400/docs
 │   ├── db.py          Neo4j schema, vector indexes, embedding-space guard
 │   ├── prompts.py     all prompts + structured-output schemas
 │   └── main.py        FastAPI routes
-├── frontend/          index.html · app.js · style.css · vendor/ (Cytoscape.js, MIT)
+│   ├── datasets/      profile.py (streaming column profiler) · catalog.py (Dataset graph)
+├── frontend/          index.html · app.js · datasets.html · datasets.js · style.css · vendor/
+├── samples/           fictional Excel datasets + generator
 ├── docker-compose.yml neo4j · backend · models-init · embed · llm
 ├── start.bat / stop.bat
 └── .env.example

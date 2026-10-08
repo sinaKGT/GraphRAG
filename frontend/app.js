@@ -222,7 +222,11 @@ function showJob(j) {
 async function pollJob(id) {
   for (;;) {
     let j;
-    try { j = await api(`/api/jobs/${id}`); } catch { await sleep(3000); continue; }
+    try { j = await api(`/api/jobs/${id}`); }
+    catch (e) {
+      if (/not found/i.test(e.message)) { $("#job").classList.add("hidden"); break; } // backend restarted: job is gone
+      await sleep(3000); continue;
+    }
     showJob(j);
     if (j.status === "done" || j.status === "failed") break;
     await sleep(1500);
@@ -232,7 +236,7 @@ async function pollJob(id) {
 }
 
 $("#reset").addEventListener("click", async () => {
-  if (!confirm("Delete the whole graph and all uploaded files?")) return;
+  if (!confirm("Delete the document graph and all uploaded documents? (The dataset catalog is kept.)")) return;
   try {
     await api("/api/graph", { method: "DELETE" });
     $("#job").classList.add("hidden");
@@ -400,7 +404,7 @@ async function replay(res) {
   await loadGraph().catch((e) => console.error(e));
   // resume progress display if a job is running (e.g. after a page reload)
   try {
-    const running = (await api("/api/jobs")).find((j) => j.status === "running" || j.status === "queued");
+    const running = (await api("/api/jobs")).find((j) => j.kind !== "profile" && (j.status === "running" || j.status === "queued"));
     if (running) pollJob(running.id);
   } catch { /* ignore */ }
 })();

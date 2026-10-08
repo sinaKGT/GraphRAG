@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     upload_dir: str = "/data/uploads"
     static_dir: str = "/app/static"
     max_upload_mb: int = 50
+    max_dataset_upload_mb: int = 500           # Excel / CSV catalog files can be large
     chunk_size_chars: int = 4000                # ~1000 tokens
     chunk_overlap_chars: int = 400
 
